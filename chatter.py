@@ -15,8 +15,11 @@ class Chatter:
         ]
 
         # Create the window
-        self.window = sg.Window('Chatter', self.layout)
+        self.window = sg.Window(f"Chatter - {self.settings.display_name}", self.layout)
         self.clientSocket = socket.socket()
+
+        # Friend list
+        self.friends = {}
 
     def run(self):
         # Connect to server
@@ -41,12 +44,22 @@ class Chatter:
 
         try:
             self.clientSocket.connect((self.settings.host, self.settings.port))
-            connect_message = json.dumps({"type": "connect", "client_id": self.settings.client_id}, ensure_ascii=False).encode("utf8")
+            connect_message = json.dumps({"type": "connect", "client_id": self.settings.client_id, "display_name": self.settings.display_name}, ensure_ascii=False).encode("utf8")
             self.clientSocket.send(connect_message)
-            while True:
-                res = self.clientSocket.recv(1024)
-                print(res.decode('utf-8'))
-                window.write_event_value('##CLIENT_HANDLER##', res.decode('utf-8'))
+            read_from_socket = True
+            while read_from_socket:
+                res = self.clientSocket.recv(2048)
+                if len(res) > 0:
+                     # Decode
+                    decoded_message = json.loads(res.decode('utf-8'))
+
+                    if decoded_message["type"] == "room":
+                        window.write_event_value('##CLIENT_HANDLER##', decoded_message)
+                    elif decoded_message["type"] == "friends":
+                        self.friends = decoded_message["friends"]
+                else:
+                    read_from_socket = False
+            self.clientSocket.close()
         except OSError as e:
             print(str(e))
             self.clientSocket.close()
@@ -56,21 +69,16 @@ class Chatter:
         message = values['##MESSAGE##']
         if message:
             # Encode
-            encoded = json.dumps({"type": "message", "to_client_id": self.settings.client_id, "text": message}, ensure_ascii=False).encode("utf8")
+            encoded_message = json.dumps({"type": "room", "client_id": self.settings.client_id, "room_id": self.settings.room_id, "text": message}, ensure_ascii=False).encode("utf8")
             # Send message
-            self.clientSocket.send(encoded)
+            self.clientSocket.send(encoded_message)
             # Update chat box
-            self.window["##CHATBOX##"].print(message)
+            self.window["##CHATBOX##"].print(f'(self): {message}')
     
     def receive(self, values):
         message = values['##CLIENT_HANDLER##']
         if message:
-            # Decode
-            decoded = json.loads(message)
-            print(decoded)
-            # Update chat box
-            if decoded["type"] == "message":
-                self.window["##CHATBOX##"].print(decoded["text"])
+            self.window["##CHATBOX##"].print(f'({self.friends[message["client_id"]]}): {message["text"]}')
 
 if __name__ == '__main__':
     chatter = Chatter()
